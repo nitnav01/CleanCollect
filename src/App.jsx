@@ -17,11 +17,21 @@ import {
 
 // --- Firebase Configuration ---
 // NOTE: Replace with your actual config for local development
-const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+const firebaseConfig = {
+  apiKey: "AIzaSyA9x7l03gCExPHP2P03C3n0n3gW1RMDGns",
+  authDomain: "cleancollect-7c124.firebaseapp.com",
+  projectId: "cleancollect-7c124",
+  storageBucket: "cleancollect-7c124.firebasestorage.app",
+  messagingSenderId: "710687481872",
+  appId: "1:710687481872:web:3c8edcd94de040a679ea95",
+  measurementId: "G-T9CNFYKKJX"
+};
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+const appId = "cleancollect-production";
 
 // --- GLOBAL STYLES ---
 const globalStyles = `
