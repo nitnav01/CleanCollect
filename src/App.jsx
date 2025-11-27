@@ -15,8 +15,24 @@ import {
   updateDoc, deleteDoc, setDoc, getDoc
 } from 'firebase/firestore';
 
+// --- EMAILJS CONFIGURATION ---
+// NOTE: In your real project, uncomment the import below and install the package:
+import emailjs from '@emailjs/browser';
+
+// MOCK EMAILJS FOR PREVIEW (Remove this block in production)
+//const emailjs = {
+  //send: async (serviceId, templateId, params, publicKey) => {
+    //console.log(`[EmailJS Simulation] Sending email to ${params.to_email}`, params);
+    //return new Promise(resolve => setTimeout(resolve, 1000)); // Fake delay
+//  }
+//};
+
+const EMAILJS_SERVICE_ID = "service_11ykrqm";
+const EMAILJS_TEMPLATE_ID = "template_tp6clsz";
+const EMAILJS_PUBLIC_KEY = "NOD2psZwcbU_yJiOi";
+
 // --- Firebase Configuration ---
-// NOTE: Replace with your actual config for local development
+// NOTE: Replace with your actual config object for local development
 const firebaseConfig = {
   apiKey: "AIzaSyA9x7l03gCExPHP2P03C3n0n3gW1RMDGns",
   authDomain: "cleancollect-7c124.firebaseapp.com",
@@ -188,6 +204,7 @@ const Reveal = ({ children, className = "", delay = 0 }) => {
   );
 };
 
+// Updated StaggeredText to allow styling passed via className and ensure word wrapping
 const StaggeredText = ({ text, className = "", delay = 0 }) => {
   const [ref, isVisible] = useOnScreen(0.1);
   const words = text.split(" ");
@@ -517,8 +534,8 @@ function LandingPage({ onGetStarted, onViewProcess }) {
                
                <Reveal delay={200}>
                   <div className="aspect-[4/5] rounded-[40px] overflow-hidden shadow-2xl border border-white/10 group relative">
-                     {/* Updated Crisis Image: E-Waste Pile (High Quality Unsplash URL) */}
-                     <img src="https://images.unsplash.com/photo-1550989460-0adf9ea622e2?auto=format&fit=crop&w=1000&q=80" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-1000" alt="E-waste mountain"/>
+                     {/* Updated Crisis Image: E-Waste Pile (Attached Image) */}
+                     <img src="/image_49c5de.jpg" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-1000" alt="E-waste mountain"/>
                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
                      <div className="absolute bottom-10 left-10 right-10">
                         <p className="text-lg italic text-white/90">"Informal recycling exposes workers to hazardous carcinogens while recovering less than 20% of valuable materials."</p>
@@ -869,6 +886,19 @@ function AuthPage({ user, setAppUser, setView, appId, showNotification }) {
             setAppUser(userData);
             showNotification(`Welcome ${userData.name}! Confirmation sent to ${email}.`);
             setView('dashboard');
+
+            // Send welcome email via EmailJS
+            emailjs.send(
+                EMAILJS_SERVICE_ID,
+                EMAILJS_TEMPLATE_ID,
+                {
+                   to_email: normalizedEmail,
+                   to_name: name,
+                   subject: "Welcome to CleanCollect!",
+                   message: "Thank you for joining the mission to close the loop on e-waste."
+                },
+                EMAILJS_PUBLIC_KEY
+            ).catch(err => console.error("EmailJS Error:", err));
         }
     } catch (error) {
         setErrorMsg(error.message);
@@ -888,11 +918,22 @@ function AuthPage({ user, setAppUser, setView, appId, showNotification }) {
           const userSnap = await getDoc(userDocRef);
           
           if (userSnap.exists()) {
+              // Send reset email via EmailJS
+              await emailjs.send(
+                  EMAILJS_SERVICE_ID,
+                  EMAILJS_TEMPLATE_ID,
+                  {
+                     to_email: normalizedEmail,
+                     subject: "Password Reset Request",
+                     message: "Click the link below to reset your password (DEMO: Use the in-app reset form for now)."
+                  },
+                  EMAILJS_PUBLIC_KEY
+              );
               setSuccessMsg(`We have sent a verification link to ${normalizedEmail}.`);
           } else {
               setErrorMsg("No account found with this email.");
           }
-      } catch (err) { setErrorMsg(err.message); }
+      } catch (err) { setErrorMsg(err.message || "Failed to send email."); }
       finally { setLoading(false); }
   };
 
@@ -1139,6 +1180,23 @@ function ResidentView({ requests, appUser, appId, showForm, setShowForm, showNot
     });
     setShowForm(false);
     showNotification(`Request for ${finalItemType} received! Confirmation email sent.`);
+
+    // Send confirmation email via EmailJS
+    emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_TEMPLATE_ID,
+        {
+           to_email: appUser.email,
+           to_name: appUser.name,
+           item_type: finalItemType,
+           quantity: formData.quantity,
+           date: formData.date,
+           subject: "Collection Scheduled!",
+           message: `Your pickup for ${formData.quantity} ${finalItemType}(s) has been scheduled for ${formData.date} at ${formData.time}.`
+        },
+        EMAILJS_PUBLIC_KEY
+    ).catch(err => console.error("EmailJS Error:", err));
+
     setFormData({ itemType: 'Laptop', otherItemType: '', quantity: 1, date: '', time: '', mobile: '', address: '' });
   };
 
@@ -1147,43 +1205,22 @@ function ResidentView({ requests, appUser, appId, showForm, setShowForm, showNot
   };
 
   return (
-    <div className="grid lg:grid-cols-1 gap-16">
+    <div className="flex flex-col gap-12">
        <div>
           {requests.length === 0 ? (
-             <div className="grid md:grid-cols-2 gap-8 items-center">
-                <div className="bg-white/60 p-10 rounded-[40px] border border-emerald-900/5 shadow-lg text-center">
-                   <div className="w-16 h-16 rounded-full bg-emerald-100 mx-auto flex items-center justify-center text-emerald-800 mb-6">
-                      <Package size={32} />
-                   </div>
-                   <h3 className="text-3xl text-emerald-950 mb-4 font-serif">Your portfolio is waiting.</h3>
-                   <p className="text-emerald-900/60 leading-relaxed mb-8 max-w-2xl mx-auto">
-                      India ranks 3rd globally in e-waste generation, producing 3.2 million tonnes annually.
-                   </p>
-                   <button onClick={() => setShowForm(true)} className="bg-emerald-900 text-[#FDFCF8] px-8 py-3 rounded-full text-sm font-medium hover:bg-emerald-800 transition-all shadow-lg font-ui">Schedule First Pickup</button>
+             <div className="bg-white/60 p-10 rounded-[40px] border border-emerald-900/5 shadow-lg text-center">
+                <div className="w-16 h-16 rounded-full bg-emerald-100 mx-auto flex items-center justify-center text-emerald-800 mb-6">
+                   <Package size={32} />
                 </div>
-                
-                {/* Did You Know Card with Image */}
-                <div className="relative rounded-[40px] overflow-hidden aspect-square md:aspect-auto h-full min-h-[300px] shadow-lg group">
-                   <img 
-                      src="https://images.unsplash.com/photo-1550041473-d296a3a8a18a?auto=format&fit=crop&w=1200&q=80" 
-                      alt="Did you know e-waste" 
-                      className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                   />
-                   <div className="absolute inset-0 bg-emerald-900/70 mix-blend-multiply"></div>
-                   <div className="absolute inset-0 p-8 flex flex-col justify-end text-white">
-                      <div className="flex items-center gap-2 mb-3 text-emerald-300 text-xs font-bold uppercase tracking-widest"><Zap size={16}/> Did you know?</div>
-                      <p className="text-lg leading-relaxed font-light">
-                         "95% of India's e-waste is processed by the informal sector, releasing toxic lead and mercury into our soil and groundwater."
-                      </p>
-                   </div>
-                </div>
+                <h3 className="text-3xl text-emerald-950 mb-4 font-serif">Your portfolio is waiting.</h3>
+                <p className="text-emerald-900/60 leading-relaxed mb-8 max-w-2xl mx-auto">
+                   India ranks 3rd globally in e-waste generation, producing 3.2 million tonnes annually.
+                </p>
+                <button onClick={() => setShowForm(true)} className="bg-emerald-900 text-[#FDFCF8] px-8 py-3 rounded-full text-sm font-medium hover:bg-emerald-800 transition-all shadow-lg font-ui">Schedule First Pickup</button>
              </div>
           ) : (
             <div>
-               {/* Animated Heading */}
-               <div className="text-2xl text-emerald-950 mb-8 leading-tight">
-                  <StaggeredText text="Active Portfolio" />
-               </div>
+               <h3 className="font-serif text-2xl text-emerald-950 mb-8">Active Portfolio</h3>
                <div className="space-y-4">
                   {requests.map(req => (
                     <div key={req.id} className="group flex flex-col md:flex-row items-center justify-between p-8 bg-white/40 border border-emerald-900/5 rounded-[32px] hover:bg-white hover:shadow-xl hover:scale-[1.01] transition-all duration-500">
@@ -1205,24 +1242,24 @@ function ResidentView({ requests, appUser, appId, showForm, setShowForm, showNot
                     </div>
                   ))}
                </div>
-               
-               {/* Bottom Full-Width Education Card (When user HAS items) */}
-               <div className="mt-12 relative rounded-[40px] overflow-hidden w-full h-[300px] shadow-lg group">
-                   <img 
-                      src="https://images.unsplash.com/photo-1550041473-d296a3a8a18a?auto=format&fit=crop&w=1200&q=80" 
-                      alt="Did you know e-waste" 
-                      className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                   />
-                   <div className="absolute inset-0 bg-emerald-900/80 mix-blend-multiply"></div>
-                   <div className="absolute inset-0 p-10 flex flex-col justify-center items-center text-center text-white">
-                      <div className="flex items-center gap-2 mb-4 text-emerald-300 text-sm font-bold uppercase tracking-widest font-ui"><Zap size={20}/> Did you know?</div>
-                      <p className="text-2xl md:text-3xl font-serif leading-relaxed max-w-3xl">
-                         "95% of India's e-waste is processed by the informal sector, releasing toxic lead and mercury into our soil and groundwater."
-                      </p>
-                   </div>
-               </div>
             </div>
           )}
+       </div>
+       
+       {/* Bottom Full-Width Education Card (Always Visible) */}
+       <div className="relative rounded-[40px] overflow-hidden w-full h-[300px] shadow-lg group mt-4">
+           <img 
+              src="https://images.unsplash.com/photo-1550041473-d296a3a8a18a?auto=format&fit=crop&w=1200&q=80" 
+              alt="Did you know e-waste" 
+              className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+           />
+           <div className="absolute inset-0 bg-emerald-900/80 mix-blend-multiply"></div>
+           <div className="absolute inset-0 p-10 flex flex-col justify-center items-center text-center text-white">
+              <div className="flex items-center gap-2 mb-4 text-emerald-300 text-sm font-bold uppercase tracking-widest font-ui"><Zap size={20}/> Did you know?</div>
+              <p className="text-2xl md:text-3xl font-serif leading-relaxed max-w-3xl">
+                 "95% of India's e-waste is processed by the informal sector, releasing toxic lead and mercury into our soil and groundwater."
+              </p>
+           </div>
        </div>
        
        {/* Sidebar / Form Modal Overlay */}
