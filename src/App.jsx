@@ -535,7 +535,7 @@ function LandingPage({ onGetStarted, onViewProcess }) {
                <Reveal delay={200}>
                   <div className="aspect-[4/5] rounded-[40px] overflow-hidden shadow-2xl border border-white/10 group relative">
                      {/* Updated Crisis Image: E-Waste Pile (Attached Image) */}
-                     <img src="/image_49c5de.jpg" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-1000" alt="E-waste mountain"/>
+                     <img src="https://images.unsplash.com/photo-1614201756100-1ccde6a6589e?q=80&w=988&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-1000" alt="E-waste mountain"/>
                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
                      <div className="absolute bottom-10 left-10 right-10">
                         <p className="text-lg italic text-white/90">"Informal recycling exposes workers to hazardous carcinogens while recovering less than 20% of valuable materials."</p>
