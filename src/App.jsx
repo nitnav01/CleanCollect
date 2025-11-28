@@ -497,7 +497,7 @@ function LandingPage({ onGetStarted, onViewProcess }) {
       <section className="py-32 px-6 bg-[#0A332B] text-emerald-50 relative overflow-hidden">
          {/* Dark Background Texture */}
          <div className="absolute inset-0 opacity-10">
-             <img src="https://images.unsplash.com/photo-1555664424-779054572d7c?auto=format&fit=crop&w=2000&q=80" className="w-full h-full object-cover grayscale" alt="Landfill texture" />
+             <img src="https://images.unsplash.com/photo-1612965110667-4175024b0dcc?q=80&w=1035&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" className="w-full h-full object-cover grayscale" alt="Landfill texture" />
          </div>
          
          <div className="max-w-7xl mx-auto relative z-10">
