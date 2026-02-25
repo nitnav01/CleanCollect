@@ -264,32 +264,40 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notification, setNotification] = useState(null);
 
+  const loadProfile = async (session) => {
+    const { data: profile } = await supabase
+      .from('profiles').select('*').eq('id', session.user.id).single();
+    const userProfile = profile || {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.user_metadata?.name || session.user.email.split('@')[0],
+      role: session.user.user_metadata?.role || 'resident',
+    };
+    setAppUser(userProfile);
+    setView('dashboard');
+    return userProfile;
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => setMinLoadDone(true), 2000);
+    let initialCheckDone = false;
 
     // Restore existing session on load
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-        const userProfile = profile || {
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.user_metadata?.name || session.user.email.split('@')[0],
-          role: 'resident',
-        };
-        setAppUser(userProfile);
-        setView('dashboard');
-      }
+      if (session) await loadProfile(session);
+      initialCheckDone = true;
       setAuthReady(true);
     });
 
-    // Listen for sign-out events
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        // User clicked a password reset link — show the reset form
+        setView('reset-password');
+        setAuthReady(true);
+      } else if (event === 'SIGNED_IN' && session && initialCheckDone) {
+        // Fires when user confirms their email via the link in their inbox
+        await loadProfile(session);
+      } else if (event === 'SIGNED_OUT') {
         setAppUser(null);
         setView('landing');
       }
@@ -394,6 +402,7 @@ export default function App() {
         {view === 'landing' && <LandingPage onGetStarted={() => setView('auth')} onViewProcess={() => setView('process')} />}
         {view === 'process' && <ProcessPage onBack={() => setView('landing')} onGetStarted={() => setView('auth')} />}
         {view === 'auth' && <AuthPage setAppUser={setAppUser} setView={setView} showNotification={showNotification} />}
+        {view === 'reset-password' && <ResetPasswordPage setView={setView} showNotification={showNotification} />}
         {view === 'dashboard' && appUser && <Dashboard appUser={appUser} showNotification={showNotification} />}
       </main>
 
@@ -849,6 +858,7 @@ function ProcessPage({ onBack, onGetStarted }) {
 // --- 3. Auth Page ---
 function AuthPage({ setAppUser, setView, showNotification }) {
   const [authMode, setAuthMode] = useState('login');
+  const [signupRole, setSignupRole] = useState('resident');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -905,27 +915,29 @@ function AuthPage({ setAppUser, setView, showNotification }) {
         const { data, error } = await supabase.auth.signUp({
           email: email.toLowerCase().trim(),
           password,
-          options: { data: { name: name || email.split('@')[0] } },
+          options: {
+            data: { name: name || email.split('@')[0], role: signupRole },
+            emailRedirectTo: `${window.location.origin}/`,
+          },
         });
         if (error) throw error;
-        // Retry up to 3 times waiting for trigger to create profile
-        let profile = null;
-        for (let i = 0; i < 3; i++) {
-          await new Promise(r => setTimeout(r, 600));
-          const { data: p } = await supabase
-            .from('profiles').select('*').eq('id', data.user.id).single();
-          if (p) { profile = p; break; }
+
+        if (data.session) {
+          // Auto-confirm still on (shouldn't happen, but handle gracefully)
+          let profile = null;
+          for (let i = 0; i < 3; i++) {
+            await new Promise(r => setTimeout(r, 600));
+            const { data: p } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
+            if (p) { profile = p; break; }
+          }
+          const userProfile = profile || { id: data.user.id, email: data.user.email, name: name || data.user.email.split('@')[0], role: signupRole };
+          setAppUser(userProfile);
+          showNotification(`Welcome ${userProfile.name}!`);
+          setView('dashboard');
+        } else {
+          // Email confirmation required — standard path
+          setSuccessMsg(`Account created! We sent a confirmation email to ${email.toLowerCase().trim()}. Click the link to verify, then sign in here.`);
         }
-        // Fallback: if trigger hasn't run, build profile from auth metadata
-        const userProfile = profile || {
-          id: data.user.id,
-          email: data.user.email,
-          name: name || data.user.email.split('@')[0],
-          role: 'resident',
-        };
-        setAppUser(userProfile);
-        showNotification(`Welcome ${userProfile.name}! Your account is ready.`);
-        setView('dashboard');
       }
     } catch (error) {
       setErrorMsg(getFriendlyAuthError(error));
@@ -1026,15 +1038,31 @@ function AuthPage({ setAppUser, setView, showNotification }) {
            ) : (
               <form onSubmit={handleAuth} className="space-y-4">
                   {authMode === 'signup' && (
-                  <input
-                    type="text"
-                    autoComplete="name"
-                    placeholder="Full Name"
-                    required
-                    className="w-full bg-white border-b border-emerald-900/10 px-0 py-4 text-lg outline-none focus:border-emerald-900 transition-colors placeholder:text-emerald-900/20 text-emerald-950 font-ui"
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                  />
+                  <div className="space-y-4">
+                    {/* Role selector */}
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-emerald-900/40 mb-3 font-ui">I am a</p>
+                      <div className="flex gap-3">
+                        <button type="button" onClick={() => setSignupRole('resident')}
+                          className={`flex-1 py-3 rounded-full border text-sm font-bold font-ui uppercase tracking-wider transition-all ${signupRole === 'resident' ? 'bg-emerald-950 text-white border-emerald-950' : 'border-emerald-900/20 text-emerald-900/60 hover:border-emerald-900/40'}`}>
+                          Resident
+                        </button>
+                        <button type="button" onClick={() => setSignupRole('recycler')}
+                          className={`flex-1 py-3 rounded-full border text-sm font-bold font-ui uppercase tracking-wider transition-all ${signupRole === 'recycler' ? 'bg-emerald-950 text-white border-emerald-950' : 'border-emerald-900/20 text-emerald-900/60 hover:border-emerald-900/40'}`}>
+                          Recycler / Agent
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      autoComplete="name"
+                      placeholder="Full Name"
+                      required
+                      className="w-full bg-white border-b border-emerald-900/10 px-0 py-4 text-lg outline-none focus:border-emerald-900 transition-colors placeholder:text-emerald-900/20 text-emerald-950 font-ui"
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                    />
+                  </div>
                   )}
                   <input
                     type="email"
@@ -1112,6 +1140,7 @@ function Dashboard({ appUser, showNotification }) {
   };
 
   useEffect(() => {
+    if (appUser.role === 'recycler') return; // RecyclerDashboard has its own fetching
     fetchRequests();
 
     const channel = supabase
@@ -1121,7 +1150,11 @@ function Dashboard({ appUser, showNotification }) {
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, []);
+  }, [appUser.role]);
+
+  if (appUser.role === 'recycler') {
+    return <RecyclerDashboard appUser={appUser} showNotification={showNotification} />;
+  }
 
   const myRequests = appUser.role === 'resident'
     ? requests.filter(r => r.user_id === appUser.id)
@@ -1431,6 +1464,277 @@ function AdminView({ requests, refreshRequests }) {
                ))}
             </tbody>
          </table>
+      </div>
+    </div>
+  );
+}
+
+// --- 5. Reset Password Page ---
+function ResetPasswordPage({ setView, showNotification }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const handleReset = async (e) => {
+    e.preventDefault();
+    if (password !== confirm) { setErrorMsg('Passwords do not match.'); return; }
+    if (password.length < 6) { setErrorMsg('Password must be at least 6 characters.'); return; }
+    setLoading(true);
+    setErrorMsg('');
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      setErrorMsg(error.message);
+    } else {
+      showNotification('Password updated! Please sign in with your new password.');
+      await supabase.auth.signOut();
+      setView('auth');
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-[100dvh] flex items-center justify-center px-6">
+      <div className="w-full max-w-md">
+        <div className="mb-10">
+          <div className="text-3xl md:text-4xl text-emerald-950 mb-3 leading-tight">
+            <StaggeredText text="Set New Password." />
+          </div>
+          <p className="text-emerald-900/50 font-ui">Choose a strong password for your account.</p>
+        </div>
+        <form onSubmit={handleReset} className="space-y-4">
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder="New Password"
+            required
+            className="w-full bg-white border-b border-emerald-900/10 px-0 py-4 text-lg outline-none focus:border-emerald-900 transition-colors placeholder:text-emerald-900/20 text-emerald-950 font-ui"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder="Confirm Password"
+            required
+            className="w-full bg-white border-b border-emerald-900/10 px-0 py-4 text-lg outline-none focus:border-emerald-900 transition-colors placeholder:text-emerald-900/20 text-emerald-950 font-ui"
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+          />
+          {errorMsg && (
+            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center font-medium font-ui">
+              <AlertCircle size={16} className="mr-2 flex-shrink-0" /> {errorMsg}
+            </div>
+          )}
+          <button disabled={loading} className="w-full bg-emerald-950 text-[#FDFCF8] py-5 rounded-full mt-8 hover:bg-emerald-900 transition-all shadow-xl active:scale-95 disabled:opacity-70 flex items-center justify-center font-ui">
+            {loading ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div> Updating...</> : 'Set New Password'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// --- 6. Recycler Onboarding ---
+function RecyclerOnboarding({ onComplete }) {
+  const [step, setStep] = useState(0);
+
+  const steps = [
+    {
+      title: 'Welcome to the Recycler Hub.',
+      desc: "You're now part of CleanCollect's certified collection network. You will fulfill e-waste pickup requests from residents in your area.",
+      Icon: Recycle,
+    },
+    {
+      title: 'Browse & Accept Jobs.',
+      desc: 'Every pending resident request is visible on your dashboard. Accept a job to assign it to yourself, then mark it collected once done.',
+      Icon: Truck,
+    },
+    {
+      title: 'Track Your Impact.',
+      desc: 'Every kilogram you collect reduces toxic waste entering landfills. Your hub tracks total collections and your environmental contribution.',
+      Icon: Leaf,
+    },
+  ];
+
+  const { title, desc, Icon } = steps[step];
+
+  return (
+    <div className="min-h-[100dvh] flex items-center justify-center px-6 bg-[#FDFCF8]">
+      <div className="w-full max-w-lg text-center">
+        {/* Step dots */}
+        <div className="flex gap-2 justify-center mb-14">
+          {steps.map((_, i) => (
+            <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${i === step ? 'w-10 bg-emerald-900' : 'w-4 bg-emerald-900/15'}`} />
+          ))}
+        </div>
+
+        <div className="w-24 h-24 bg-emerald-950 rounded-[28px] flex items-center justify-center mx-auto mb-8 text-white transition-all duration-500">
+          <Icon size={40} strokeWidth={1.5} />
+        </div>
+        <h2 className="text-3xl md:text-4xl text-emerald-950 mb-6 leading-tight">{title}</h2>
+        <p className="text-lg text-emerald-900/60 leading-relaxed mb-12 max-w-md mx-auto font-light">{desc}</p>
+
+        <div className="flex gap-4 justify-center">
+          {step < steps.length - 1 ? (
+            <button onClick={() => setStep(s => s + 1)}
+              className="bg-emerald-950 text-white px-10 py-4 rounded-full flex items-center gap-2 hover:bg-emerald-900 transition-all font-ui font-bold">
+              Continue <ArrowRight size={18} />
+            </button>
+          ) : (
+            <button onClick={onComplete}
+              className="bg-emerald-950 text-white px-10 py-4 rounded-full flex items-center gap-2 hover:bg-emerald-900 transition-all font-ui font-bold">
+              Start Collecting <ArrowRight size={18} />
+            </button>
+          )}
+          {step === 0 && (
+            <button onClick={onComplete}
+              className="px-10 py-4 rounded-full border border-emerald-900/20 text-emerald-900/50 hover:text-emerald-900 transition-colors font-ui">
+              Skip
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- 7. Recycler Dashboard ---
+function RecyclerJobCard({ req, action, actionLabel, actionClass }) {
+  return (
+    <div className="bg-white/60 backdrop-blur-sm border border-emerald-900/5 rounded-[28px] p-5 md:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-white hover:shadow-lg transition-all">
+      <div className="flex items-start gap-4">
+        <div className="w-12 h-12 rounded-full bg-emerald-100 flex-shrink-0 flex items-center justify-center text-emerald-800">
+          <Package size={22} />
+        </div>
+        <div>
+          <p className="font-bold text-emerald-950 text-lg">{req.quantity}× {req.item_type}</p>
+          <p className="text-sm text-emerald-900/60 font-ui mt-0.5">{req.user_name} · {req.date} at {req.time}</p>
+          <p className="text-xs text-emerald-900/40 font-ui mt-0.5">{req.address}</p>
+          {req.mobile && <p className="text-xs text-emerald-700/60 font-ui mt-0.5">{req.mobile}</p>}
+        </div>
+      </div>
+      <button onClick={action}
+        className={`${actionClass} px-6 py-2.5 rounded-full text-sm font-bold font-ui uppercase tracking-wider flex-shrink-0 transition-all active:scale-95`}>
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
+
+function RecyclerDashboard({ appUser, showNotification }) {
+  const [requests, setRequests] = useState([]);
+  const [showOnboarding, setShowOnboarding] = useState(
+    !localStorage.getItem(`recycler_onboarded_${appUser.id}`)
+  );
+
+  const fetchRequests = async () => {
+    const { data } = await supabase
+      .from('pickup_requests').select('*').order('created_at', { ascending: false });
+    setRequests(data || []);
+  };
+
+  useEffect(() => {
+    fetchRequests();
+    const channel = supabase.channel('recycler_dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pickup_requests' }, () => fetchRequests())
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, []);
+
+  const availableJobs = requests.filter(r => r.status === 'Pending');
+  const myJobs = requests.filter(r => r.recycler_id === appUser.id);
+  const activeJobs = myJobs.filter(r => r.status === 'Scheduled');
+  const completedJobs = myJobs.filter(r => r.status === 'Collected');
+
+  const acceptJob = async (id) => {
+    const { error } = await supabase.from('pickup_requests')
+      .update({ status: 'Scheduled', recycler_id: appUser.id }).eq('id', id);
+    if (!error) { showNotification('Job accepted! Coordinate pickup with the resident.'); fetchRequests(); }
+    else showNotification('Failed to accept job. Please try again.', 'error');
+  };
+
+  const completeJob = async (id) => {
+    const { error } = await supabase.from('pickup_requests')
+      .update({ status: 'Collected' }).eq('id', id);
+    if (!error) { showNotification('Collection complete! Great work.'); fetchRequests(); }
+    else showNotification('Failed to update status. Try again.', 'error');
+  };
+
+  const handleOnboardingComplete = () => {
+    localStorage.setItem(`recycler_onboarded_${appUser.id}`, 'true');
+    setShowOnboarding(false);
+  };
+
+  if (showOnboarding) {
+    return <RecyclerOnboarding onComplete={handleOnboardingComplete} />;
+  }
+
+  return (
+    <div className="flex-1 px-4 md:px-6 pb-20 pt-12">
+      <div className="max-w-7xl mx-auto">
+        <div className="pt-10 border-b border-emerald-900/5 pb-6 md:pb-10 mb-6 md:mb-12">
+          <div className="text-4xl md:text-5xl lg:text-6xl text-emerald-950 mb-2 leading-tight">
+            <StaggeredText text="Recycler Hub" />
+          </div>
+          <p className="text-emerald-900/50 text-base md:text-lg font-light">Welcome back, {appUser.name}.</p>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-4 md:gap-6 mb-10 md:mb-16">
+          <div className="glass-dark p-5 md:p-8 rounded-[32px] flex flex-col justify-between min-h-[120px] md:min-h-[180px] relative overflow-hidden">
+            <div className="text-emerald-300 font-bold uppercase tracking-widest text-xs font-ui">Available</div>
+            <div className="text-3xl md:text-5xl text-white">{availableJobs.length}</div>
+            <div className="text-emerald-100/50 text-xs font-ui">Pending jobs</div>
+            <div className="absolute right-0 bottom-0 opacity-10"><Package size={120} /></div>
+          </div>
+          <div className="glass p-5 md:p-8 rounded-[32px] border border-emerald-900/5 flex flex-col justify-between min-h-[120px] md:min-h-[180px]">
+            <div className="text-emerald-900/40 font-bold uppercase tracking-widest text-xs font-ui">Active</div>
+            <div className="text-3xl md:text-5xl text-emerald-950">{activeJobs.length}</div>
+            <div className="text-emerald-900/40 text-xs font-ui">Accepted by you</div>
+          </div>
+          <div className="glass p-5 md:p-8 rounded-[32px] border border-emerald-900/5 flex flex-col justify-between min-h-[120px] md:min-h-[180px]">
+            <div className="text-emerald-900/40 font-bold uppercase tracking-widest text-xs font-ui">Completed</div>
+            <div className="text-3xl md:text-5xl text-emerald-600">{completedJobs.length}</div>
+            <div className="text-emerald-900/40 text-xs font-ui">Total collections</div>
+          </div>
+        </div>
+
+        {/* Active jobs */}
+        {activeJobs.length > 0 && (
+          <div className="mb-10 md:mb-14">
+            <h3 className="font-serif text-xl md:text-2xl text-emerald-950 mb-6">My Active Jobs</h3>
+            <div className="space-y-4">
+              {activeJobs.map(req => (
+                <RecyclerJobCard key={req.id} req={req}
+                  action={() => completeJob(req.id)}
+                  actionLabel="Mark Collected"
+                  actionClass="bg-emerald-900 text-white hover:bg-emerald-800" />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Available pickups */}
+        <div>
+          <h3 className="font-serif text-xl md:text-2xl text-emerald-950 mb-6">Available Pickups</h3>
+          {availableJobs.length === 0 ? (
+            <div className="bg-white/60 p-8 md:p-10 rounded-[40px] border border-emerald-900/5 text-center">
+              <div className="w-14 h-14 rounded-full bg-emerald-100 mx-auto flex items-center justify-center text-emerald-800 mb-4"><Package size={28} /></div>
+              <p className="text-emerald-950 font-serif text-xl mb-2">No pending pickups right now.</p>
+              <p className="text-emerald-900/50 font-light text-sm">New requests from residents will appear here.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {availableJobs.map(req => (
+                <RecyclerJobCard key={req.id} req={req}
+                  action={() => acceptJob(req.id)}
+                  actionLabel="Accept Job"
+                  actionClass="bg-emerald-100 text-emerald-900 hover:bg-emerald-200" />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
