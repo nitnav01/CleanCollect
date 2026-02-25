@@ -88,6 +88,15 @@ const useOnScreen = (threshold = 0.1) => {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
+    if (!ref.current) { setIsVisible(true); return; }
+
+    // Immediately reveal if already in viewport (above-the-fold content)
+    const rect = ref.current.getBoundingClientRect();
+    if (rect.top < window.innerHeight && rect.bottom > 0) {
+      setIsVisible(true);
+      return;
+    }
+
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -98,7 +107,7 @@ const useOnScreen = (threshold = 0.1) => {
       { threshold }
     );
 
-    if (ref.current) observer.observe(ref.current);
+    observer.observe(ref.current);
     return () => observer.disconnect();
   }, [threshold]);
 
@@ -266,10 +275,14 @@ export default function App() {
           .select('*')
           .eq('id', session.user.id)
           .single();
-        if (profile) {
-          setAppUser(profile);
-          setView('dashboard');
-        }
+        const userProfile = profile || {
+          id: session.user.id,
+          email: session.user.email,
+          name: session.user.user_metadata?.name || session.user.email.split('@')[0],
+          role: 'resident',
+        };
+        setAppUser(userProfile);
+        setView('dashboard');
       }
       setAuthReady(true);
     });
@@ -878,7 +891,14 @@ function AuthPage({ setAppUser, setView, showNotification }) {
           .select('*')
           .eq('id', data.user.id)
           .single();
-        setAppUser(profile);
+        // Fallback: if profile not found, use auth user metadata
+        const userProfile = profile || {
+          id: data.user.id,
+          email: data.user.email,
+          name: data.user.user_metadata?.name || data.user.email.split('@')[0],
+          role: 'resident',
+        };
+        setAppUser(userProfile);
         setView('dashboard');
 
       } else if (authMode === 'signup') {
@@ -888,21 +908,24 @@ function AuthPage({ setAppUser, setView, showNotification }) {
           options: { data: { name: name || email.split('@')[0] } },
         });
         if (error) throw error;
-        // Wait briefly for trigger to create profile
-        await new Promise(r => setTimeout(r, 500));
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.user.id)
-          .single();
-        if (profile) {
-          setAppUser(profile);
-          showNotification(`Welcome ${profile.name}! Your account is ready.`);
-          setView('dashboard');
-        } else {
-          setSuccessMsg('Account created! Please check your email to confirm, then sign in.');
-          setAuthMode('login');
+        // Retry up to 3 times waiting for trigger to create profile
+        let profile = null;
+        for (let i = 0; i < 3; i++) {
+          await new Promise(r => setTimeout(r, 600));
+          const { data: p } = await supabase
+            .from('profiles').select('*').eq('id', data.user.id).single();
+          if (p) { profile = p; break; }
         }
+        // Fallback: if trigger hasn't run, build profile from auth metadata
+        const userProfile = profile || {
+          id: data.user.id,
+          email: data.user.email,
+          name: name || data.user.email.split('@')[0],
+          role: 'resident',
+        };
+        setAppUser(userProfile);
+        showNotification(`Welcome ${userProfile.name}! Your account is ready.`);
+        setView('dashboard');
       }
     } catch (error) {
       setErrorMsg(getFriendlyAuthError(error));
