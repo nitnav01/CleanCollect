@@ -1240,20 +1240,34 @@ function Dashboard({ appUser, showNotification }) {
 }
 
 function ResidentView({ requests, appUser, showForm, setShowForm, showNotification, refreshRequests }) {
-  const [formData, setFormData] = useState({
-    itemType: 'Laptop',
-    otherItemType: '',
-    quantity: 1,
-    date: '',
-    time: '',
-    mobile: '',
-    address: ''
-  });
+  const emptyForm = { itemType: 'Laptop', otherItemType: '', quantity: 1, date: '', time: '', mobile: '', addressLine: '', pincode: '' };
+  const [formData, setFormData] = useState(emptyForm);
+
+  const pincodeComplete = formData.pincode.length === 6;
+  const isServiceable  = formData.pincode === '122002';
+  const showUnavailable = pincodeComplete && !isServiceable;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const finalItemType = formData.itemType === 'Other' ? formData.otherItemType : formData.itemType;
 
+    if (showUnavailable) {
+      // Outside service area → save to waitlist for later outreach
+      const { error } = await supabase.from('waitlist').insert([{
+        user_id: appUser.id,
+        email: appUser.email,
+        name: appUser.name,
+        mobile: formData.mobile,
+        pincode: formData.pincode,
+      }]);
+      if (error) { showNotification('Something went wrong. Please try again.', 'error'); return; }
+      setShowForm(false);
+      showNotification(`Noted! We'll reach out to ${formData.mobile} when service launches in ${formData.pincode}.`);
+      setFormData(emptyForm);
+      return;
+    }
+
+    // Serviceable pickup
+    const finalItemType = formData.itemType === 'Other' ? formData.otherItemType : formData.itemType;
     const { error } = await supabase.from('pickup_requests').insert([{
       user_id: appUser.id,
       user_email: appUser.email,
@@ -1264,7 +1278,8 @@ function ResidentView({ requests, appUser, showForm, setShowForm, showNotificati
       date: formData.date,
       time: formData.time,
       mobile: formData.mobile,
-      address: formData.address,
+      address: formData.addressLine,
+      pincode: formData.pincode,
       status: 'Pending',
     }]);
 
@@ -1275,7 +1290,7 @@ function ResidentView({ requests, appUser, showForm, setShowForm, showNotificati
 
     setShowForm(false);
     showNotification(`Request for ${finalItemType} received!`);
-    setFormData({ itemType: 'Laptop', otherItemType: '', quantity: 1, date: '', time: '', mobile: '', address: '' });
+    setFormData(emptyForm);
     refreshRequests();
   };
 
@@ -1350,51 +1365,81 @@ function ResidentView({ requests, appUser, showForm, setShowForm, showNotificati
             <div className="absolute inset-0 bg-emerald-950/20 backdrop-blur-sm" onClick={() => setShowForm(false)}></div>
             <div className="glass-dark w-full max-w-lg mx-4 p-6 md:p-10 rounded-[40px] relative shadow-2xl overflow-y-auto max-h-[90dvh]">
                <div className="flex justify-between items-center mb-6 md:mb-8">
-                  <h2 className="text-2xl md:text-3xl text-white">Request Collection</h2>
+                  <div>
+                     <h2 className="text-2xl md:text-3xl text-white">Request Collection</h2>
+                     {showUnavailable && <p className="text-orange-300 text-xs mt-1 font-ui">Outside current service area</p>}
+                  </div>
                   <button onClick={() => setShowForm(false)} className="text-white/50 hover:text-white p-1"><X size={24}/></button>
                </div>
                <form onSubmit={handleSubmit} className="space-y-4 md:space-y-5 font-ui">
+
+                  {/* ── Address fields (shown first so pincode can gate the rest) ── */}
                   <div className="space-y-2">
-                     <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Item Type</label>
-                     <select className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none" value={formData.itemType} onChange={e => setFormData({...formData, itemType: e.target.value})}>
-                        {['Laptop', 'Mobile', 'Tablet', 'Batteries', 'Other'].map(o => <option key={o} className="text-emerald-950">{o}</option>)}
-                     </select>
+                     <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Street Address / Locality</label>
+                     <textarea rows="2" className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none resize-none placeholder-white/30" placeholder="House/flat no., street, area, landmark…" value={formData.addressLine} onChange={e => setFormData({...formData, addressLine: e.target.value})} required={!showUnavailable}></textarea>
                   </div>
 
-                  {formData.itemType === 'Other' && (
-                     <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Specify Item</label>
-                        <input type="text" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none placeholder-white/30" placeholder="E.g. Printer, Monitor..." value={formData.otherItemType} onChange={e => setFormData({...formData, otherItemType: e.target.value})} />
+                  <div className="space-y-2">
+                     <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Pincode</label>
+                        {pincodeComplete && (
+                           <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 ${isServiceable ? 'text-emerald-400' : 'text-orange-400'}`}>
+                              {isServiceable ? '✓ Service available' : '⚠ Outside service area'}
+                           </span>
+                        )}
+                     </div>
+                     <input type="text" inputMode="numeric" maxLength={6} required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none placeholder-white/30" placeholder="6-digit pincode" value={formData.pincode} onChange={e => setFormData({...formData, pincode: e.target.value.replace(/\D/g, '').slice(0, 6)})} />
+                  </div>
+
+                  {/* ── Service unavailable banner ── */}
+                  {showUnavailable && (
+                     <div className="bg-orange-500/15 border border-orange-400/30 rounded-xl p-4 space-y-1">
+                        <p className="text-orange-200 text-sm font-bold">Service not yet available at {formData.pincode}.</p>
+                        <p className="text-orange-200/80 text-xs leading-relaxed">We currently operate in Gurugram (122002). Leave your mobile number below and we'll notify you as soon as we expand to your area.</p>
                      </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                     <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Quantity</label>
-                        <input type="number" min="1" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none" value={formData.quantity} onChange={e => setFormData({...formData, quantity: parseInt(e.target.value)})} />
-                     </div>
-                     <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Mobile Number</label>
-                        <input type="tel" inputMode="tel" autoComplete="tel" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none" placeholder="+91..." value={formData.mobile} onChange={e => setFormData({...formData, mobile: e.target.value})} />
-                     </div>
-                  </div>
+                  {/* ── Scheduling fields (only for serviceable areas) ── */}
+                  {!showUnavailable && (
+                     <>
+                        <div className="space-y-2">
+                           <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Item Type</label>
+                           <select required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none" value={formData.itemType} onChange={e => setFormData({...formData, itemType: e.target.value})}>
+                              {['Laptop', 'Mobile', 'Tablet', 'Batteries', 'Other'].map(o => <option key={o} className="text-emerald-950">{o}</option>)}
+                           </select>
+                        </div>
+                        {formData.itemType === 'Other' && (
+                           <div className="space-y-2">
+                              <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Specify Item</label>
+                              <input type="text" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none placeholder-white/30" placeholder="E.g. Printer, Monitor…" value={formData.otherItemType} onChange={e => setFormData({...formData, otherItemType: e.target.value})} />
+                           </div>
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                           <div className="space-y-2">
+                              <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Quantity</label>
+                              <input type="number" min="1" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none" value={formData.quantity} onChange={e => setFormData({...formData, quantity: parseInt(e.target.value)})} />
+                           </div>
+                           <div className="space-y-2">
+                              <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Preferred Date</label>
+                              <input type="date" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+                           </div>
+                        </div>
+                        <div className="space-y-2">
+                           <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Time Slot</label>
+                           <input type="time" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none" value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} />
+                        </div>
+                     </>
+                  )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                     <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Preferred Date</label>
-                        <input type="date" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
-                     </div>
-                     <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Time Slot</label>
-                        <input type="time" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none" value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} />
-                     </div>
-                  </div>
-
+                  {/* ── Mobile number (always shown) ── */}
                   <div className="space-y-2">
-                     <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Pickup Address</label>
-                     <textarea rows="3" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none resize-none" placeholder="Enter complete address including landmark..." value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})}></textarea>
+                     <label className="text-xs font-bold uppercase tracking-widest text-emerald-400">Mobile Number</label>
+                     <input type="tel" inputMode="tel" autoComplete="tel" required className="w-full bg-white/5 border-none rounded-xl p-4 text-white focus:ring-1 focus:ring-emerald-400 outline-none placeholder-white/30" placeholder="+91…" value={formData.mobile} onChange={e => setFormData({...formData, mobile: e.target.value})} />
                   </div>
-                  <button className="w-full bg-emerald-500 text-emerald-950 font-bold py-4 md:py-5 rounded-xl hover:bg-emerald-400 transition-all mt-2">Confirm Request</button>
+
+                  <button type="submit" className={`w-full font-bold py-4 md:py-5 rounded-xl transition-all mt-2 ${showUnavailable ? 'bg-orange-400 text-white hover:bg-orange-300' : 'bg-emerald-500 text-emerald-950 hover:bg-emerald-400'}`}>
+                     {showUnavailable ? 'Notify Me When Available' : 'Confirm Request'}
+                  </button>
                </form>
             </div>
          </div>
@@ -1404,71 +1449,133 @@ function ResidentView({ requests, appUser, showForm, setShowForm, showNotificati
 }
 
 function AdminView({ requests, refreshRequests }) {
+  const [waitlist, setWaitlist] = useState([]);
+
+  useEffect(() => {
+    supabase.from('waitlist').select('*').order('created_at', { ascending: false })
+      .then(({ data }) => setWaitlist(data || []));
+  }, []);
+
   const updateStatus = async (id, s) => {
     await supabase.from('pickup_requests').update({ status: s }).eq('id', id);
     refreshRequests();
   };
 
   return (
-    <div className="bg-white/50 backdrop-blur-xl border border-emerald-900/5 rounded-[40px] overflow-hidden">
-      {/* Mobile card view */}
-      <div className="md:hidden divide-y divide-emerald-900/5">
-        {requests.length === 0 && (
-          <p className="p-8 text-center text-emerald-900/40 font-ui">No requests yet.</p>
-        )}
-        {requests.map(req => (
-          <div key={req.id} className="p-5 space-y-3">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="font-bold text-emerald-950">{req.user_name}</p>
-                <p className="text-xs text-emerald-900/50 font-ui">{req.user_email}</p>
+    <div className="space-y-6">
+      {/* ── Pickup Requests ── */}
+      <div className="bg-white/50 backdrop-blur-xl border border-emerald-900/5 rounded-[40px] overflow-hidden">
+        {/* Mobile card view */}
+        <div className="md:hidden divide-y divide-emerald-900/5">
+          {requests.length === 0 && (
+            <p className="p-8 text-center text-emerald-900/40 font-ui">No requests yet.</p>
+          )}
+          {requests.map(req => (
+            <div key={req.id} className="p-5 space-y-3">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="font-bold text-emerald-950">{req.user_name}</p>
+                  <p className="text-xs text-emerald-900/50 font-ui">{req.user_email}</p>
+                </div>
+                <StatusBadge status={req.status} />
               </div>
-              <StatusBadge status={req.status} />
+              <div className="text-sm text-emerald-900/70 font-ui space-y-1">
+                <p className="font-bold text-emerald-900">{req.quantity}x {req.item_type}</p>
+                <p>{req.date} at {req.time}</p>
+                <p className="text-emerald-900/50">{req.address}{req.pincode ? ` · ${req.pincode}` : ''}</p>
+                {req.mobile && <p className="text-emerald-900/50">{req.mobile}</p>}
+              </div>
+              <div className="flex gap-2 pt-1 font-ui">
+                {req.status === 'Pending' && (
+                  <button onClick={() => updateStatus(req.id, 'Scheduled')} className="px-5 py-2 bg-emerald-100 text-emerald-900 rounded-full text-xs font-bold uppercase tracking-wider hover:bg-emerald-200">
+                    Approve
+                  </button>
+                )}
+                {req.status === 'Scheduled' && (
+                  <button onClick={() => updateStatus(req.id, 'Collected')} className="px-5 py-2 bg-emerald-900 text-white rounded-full text-xs font-bold uppercase tracking-wider hover:bg-emerald-800">
+                    Finalize
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="text-sm text-emerald-900/70 font-ui space-y-1">
-              <p className="font-bold text-emerald-900">{req.quantity}x {req.item_type}</p>
-              <p>{req.date} at {req.time}</p>
-              <p className="text-emerald-900/50">{req.address}</p>
-            </div>
-            <div className="flex gap-2 pt-1 font-ui">
-              {req.status === 'Pending' && (
-                <button onClick={() => updateStatus(req.id, 'Scheduled')} className="px-5 py-2 bg-emerald-100 text-emerald-900 rounded-full text-xs font-bold uppercase tracking-wider hover:bg-emerald-200">
-                  Approve
-                </button>
-              )}
-              {req.status === 'Scheduled' && (
-                <button onClick={() => updateStatus(req.id, 'Collected')} className="px-5 py-2 bg-emerald-900 text-white rounded-full text-xs font-bold uppercase tracking-wider hover:bg-emerald-800">
-                  Finalize
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block overflow-x-auto">
+           <table className="w-full text-left">
+              <thead className="text-xs font-bold uppercase tracking-widest text-emerald-900/40 border-b border-emerald-900/5 font-ui">
+                 <tr><th className="p-6 lg:p-8">User</th><th className="p-6 lg:p-8">Details</th><th className="p-6 lg:p-8">Mobile</th><th className="p-6 lg:p-8">Status</th><th className="p-6 lg:p-8 text-right">Action</th></tr>
+              </thead>
+              <tbody className="divide-y divide-emerald-900/5">
+                 {requests.map(req => (
+                    <tr key={req.id} className="hover:bg-white/50 transition-colors">
+                       <td className="p-6 lg:p-8 text-base lg:text-xl text-emerald-950">{req.user_name}</td>
+                       <td className="p-6 lg:p-8">
+                          <div className="font-bold text-emerald-900">{req.quantity}x {req.item_type}</div>
+                          <div className="text-sm text-emerald-900/40">{req.address}{req.pincode ? ` · ${req.pincode}` : ''}</div>
+                          <div className="text-xs text-emerald-900/30">{req.date} {req.time}</div>
+                       </td>
+                       <td className="p-6 lg:p-8 text-sm text-emerald-900/60 font-ui">{req.mobile || '—'}</td>
+                       <td className="p-6 lg:p-8"><StatusBadge status={req.status} /></td>
+                       <td className="p-6 lg:p-8 text-right space-x-2 font-ui">
+                          {req.status === 'Pending' && <button onClick={() => updateStatus(req.id, 'Scheduled')} className="px-6 py-2 bg-emerald-100 text-emerald-900 rounded-full text-xs font-bold uppercase tracking-wider hover:bg-emerald-200">Approve</button>}
+                          {req.status === 'Scheduled' && <button onClick={() => updateStatus(req.id, 'Collected')} className="px-6 py-2 bg-emerald-900 text-white rounded-full text-xs font-bold uppercase tracking-wider hover:bg-emerald-800">Finalize</button>}
+                       </td>
+                    </tr>
+                 ))}
+              </tbody>
+           </table>
+        </div>
       </div>
 
-      {/* Desktop table */}
-      <div className="hidden md:block overflow-x-auto">
-         <table className="w-full text-left">
+      {/* ── Expansion Waitlist ── */}
+      <div className="bg-white/50 backdrop-blur-xl border border-emerald-900/5 rounded-[40px] overflow-hidden">
+        <div className="p-6 lg:p-8 border-b border-emerald-900/5 flex items-center justify-between">
+          <div>
+            <h3 className="font-serif text-xl text-emerald-950">Expansion Waitlist</h3>
+            <p className="text-xs text-emerald-900/40 font-ui mt-1 uppercase tracking-widest">Contacts from outside service area</p>
+          </div>
+          <span className="bg-orange-100 text-orange-700 text-xs font-bold uppercase tracking-widest px-4 py-2 rounded-full font-ui">{waitlist.length} contacts</span>
+        </div>
+
+        {/* Mobile cards */}
+        <div className="md:hidden divide-y divide-emerald-900/5">
+          {waitlist.length === 0 && <p className="p-8 text-center text-emerald-900/40 font-ui">No waitlist entries yet.</p>}
+          {waitlist.map(w => (
+            <div key={w.id} className="p-5 space-y-1 font-ui">
+              <p className="font-bold text-emerald-950">{w.name || '—'}</p>
+              <p className="text-sm text-emerald-900/60">{w.email}</p>
+              <div className="flex gap-4 text-sm text-emerald-900/50 pt-1">
+                <span>{w.mobile}</span>
+                <span className="font-bold text-orange-600">{w.pincode}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-left">
             <thead className="text-xs font-bold uppercase tracking-widest text-emerald-900/40 border-b border-emerald-900/5 font-ui">
-               <tr><th className="p-6 lg:p-8">User</th><th className="p-6 lg:p-8">Details</th><th className="p-6 lg:p-8">Status</th><th className="p-6 lg:p-8 text-right">Action</th></tr>
+              <tr><th className="p-6 lg:p-8">Name</th><th className="p-6 lg:p-8">Email</th><th className="p-6 lg:p-8">Mobile</th><th className="p-6 lg:p-8">Pincode</th><th className="p-6 lg:p-8">Date</th></tr>
             </thead>
             <tbody className="divide-y divide-emerald-900/5">
-               {requests.map(req => (
-                  <tr key={req.id} className="hover:bg-white/50 transition-colors">
-                     <td className="p-6 lg:p-8 text-base lg:text-xl text-emerald-950">{req.user_name}</td>
-                     <td className="p-6 lg:p-8">
-                        <div className="font-bold text-emerald-900">{req.quantity}x {req.item_type}</div>
-                        <div className="text-sm text-emerald-900/40">{req.address}</div>
-                     </td>
-                     <td className="p-6 lg:p-8"><StatusBadge status={req.status} /></td>
-                     <td className="p-6 lg:p-8 text-right space-x-2 font-ui">
-                        {req.status === 'Pending' && <button onClick={() => updateStatus(req.id, 'Scheduled')} className="px-6 py-2 bg-emerald-100 text-emerald-900 rounded-full text-xs font-bold uppercase tracking-wider hover:bg-emerald-200">Approve</button>}
-                        {req.status === 'Scheduled' && <button onClick={() => updateStatus(req.id, 'Collected')} className="px-6 py-2 bg-emerald-900 text-white rounded-full text-xs font-bold uppercase tracking-wider hover:bg-emerald-800">Finalize</button>}
-                     </td>
-                  </tr>
-               ))}
+              {waitlist.length === 0 && (
+                <tr><td colSpan="5" className="p-8 text-center text-emerald-900/40 font-ui">No waitlist entries yet.</td></tr>
+              )}
+              {waitlist.map(w => (
+                <tr key={w.id} className="hover:bg-white/50 transition-colors">
+                  <td className="p-6 lg:p-8 text-emerald-950">{w.name || '—'}</td>
+                  <td className="p-6 lg:p-8 text-sm text-emerald-900/60 font-ui">{w.email}</td>
+                  <td className="p-6 lg:p-8 text-sm text-emerald-900/80 font-ui">{w.mobile}</td>
+                  <td className="p-6 lg:p-8"><span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full font-ui">{w.pincode}</span></td>
+                  <td className="p-6 lg:p-8 text-sm text-emerald-900/40 font-ui">{new Date(w.created_at).toLocaleDateString('en-IN')}</td>
+                </tr>
+              ))}
             </tbody>
-         </table>
+          </table>
+        </div>
       </div>
     </div>
   );
