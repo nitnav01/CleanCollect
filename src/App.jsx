@@ -404,8 +404,8 @@ export default function App() {
       </nav>
 
       <main className="relative z-10 min-h-[100dvh] flex flex-col">
-        {view === 'landing' && <LandingPage onGetStarted={() => setView('auth')} onViewProcess={() => setView('process')} />}
-        {view === 'process' && <ProcessPage onBack={() => setView('landing')} onGetStarted={() => setView('auth')} />}
+        {view === 'landing' && <LandingPage onGetStarted={() => setView(appUser ? 'dashboard' : 'auth')} onViewProcess={() => setView('process')} />}
+        {view === 'process' && <ProcessPage onBack={() => setView('landing')} onGetStarted={() => setView(appUser ? 'dashboard' : 'auth')} />}
         {view === 'auth' && <AuthPage setAppUser={setAppUser} setView={setView} showNotification={showNotification} />}
         {view === 'reset-password' && <ResetPasswordPage setView={setView} showNotification={showNotification} />}
         {view === 'dashboard' && appUser && <Dashboard appUser={appUser} showNotification={showNotification} />}
