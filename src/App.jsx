@@ -265,8 +265,13 @@ export default function App() {
   const [notification, setNotification] = useState(null);
 
   const loadProfile = async (session) => {
-    const { data: profile } = await supabase
-      .from('profiles').select('*').eq('id', session.user.id).single();
+    let profile = null;
+    for (let i = 0; i < 4; i++) {
+      const { data } = await supabase
+        .from('profiles').select('*').eq('id', session.user.id).single();
+      if (data) { profile = data; break; }
+      await new Promise(r => setTimeout(r, 600));
+    }
     const userProfile = profile || {
       id: session.user.id,
       email: session.user.email,
@@ -349,7 +354,7 @@ export default function App() {
           {appUser ? (
             <>
               <div className="text-center mb-2">
-                <p className="text-xs font-bold uppercase tracking-widest text-emerald-900/40 font-ui">{appUser.role === 'admin' ? 'Administrator' : 'Resident'}</p>
+                <p className="text-xs font-bold uppercase tracking-widest text-emerald-900/40 font-ui">{appUser.role === 'admin' ? 'Administrator' : appUser.role === 'recycler' ? 'Recycler' : 'Resident'}</p>
                 <p className="text-2xl font-bold text-emerald-900">{appUser.name}</p>
               </div>
               <button onClick={() => navigateTo('dashboard')} className="text-xl font-bold text-emerald-950 py-2">Dashboard</button>
@@ -380,7 +385,7 @@ export default function App() {
             {appUser ? (
               <>
                 <div className="px-6 flex flex-col items-end leading-none border-r border-emerald-900/10 pr-6 mr-2">
-                   <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-900/40">{appUser.role === 'admin' ? 'Administrator' : 'Resident'}</span>
+                   <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-900/40">{appUser.role === 'admin' ? 'Administrator' : appUser.role === 'recycler' ? 'Recycler' : 'Resident'}</span>
                    <span className="font-bold text-emerald-900">{appUser.name}</span>
                 </div>
                 <button onClick={() => setView('dashboard')} className="bg-emerald-900 text-[#FDFCF8] px-6 py-3 rounded-full text-sm font-medium hover:bg-emerald-800 transition-all shadow-lg active:scale-95">Dashboard</button>
@@ -906,7 +911,7 @@ function AuthPage({ setAppUser, setView, showNotification }) {
           id: data.user.id,
           email: data.user.email,
           name: data.user.user_metadata?.name || data.user.email.split('@')[0],
-          role: 'resident',
+          role: data.user.user_metadata?.role || 'resident',
         };
         setAppUser(userProfile);
         setView('dashboard');
